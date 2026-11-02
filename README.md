@@ -6,7 +6,8 @@ MVP para controlar la cartera de proyectos de Banco Sabadell con la jerarquía:
 
 ## Funcionalidades
 
-- Horas estimadas y reales por tarea y persona, con desviación automática.
+- Horas estimadas y reales editables por iniciativa, tarea y persona, con desviación automática.
+- Redistribución proporcional de horas al modificar el total de una iniciativa o tarea.
 - Forecast de horas y coste según tarifa individual.
 - Capacidad del equipo según ubicación, jornada, fines de semana y festivos configurables.
 - Resumen de cartera, detalle editable, vista de equipo y calendarios laborales.

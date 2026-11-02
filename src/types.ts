@@ -23,6 +23,8 @@ export interface Task {
   name: string
   type: TaskType
   assignments: Assignment[]
+  unassignedEstimatedHours?: number
+  unassignedActualHours?: number
 }
 
 export interface Initiative {
@@ -53,6 +55,7 @@ export interface Initiative {
     actualAllocation: 'proportional' | 'unassigned' | 'manual'
   }
   unassignedActualHours?: number
+  unassignedEstimatedHours?: number
 }
 
 export interface HolidayCalendar {

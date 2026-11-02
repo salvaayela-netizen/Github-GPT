@@ -114,7 +114,8 @@ h1 { font-size: 25px; font-weight: 700; letter-spacing: -.6px; margin: 5px 0 0; 
 .table-title strong, .table-title small { display: block; }
 .table-title small { font-size: 9px; color: #84908c; margin-top: 3px; }
 .date-range { color: #65716d; font-size: 10px; }
-.task-row { background: #fbfcfa; }
+.task-row, .task-summary-row { background: #fbfcfa; }
+.task-summary-row { border-top: 1px solid #dce3dd; }
 .source-row { background: #f3f7f3; }
 .source-row td { padding: 10px 19px 10px 55px; }
 .source-row td > div { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
@@ -124,7 +125,12 @@ h1 { font-size: 25px; font-weight: 700; letter-spacing: -.6px; margin: 5px 0 0; 
 .source-row span { color: #71807b; font-size: 9px; }
 .source-row td > div:last-child { white-space: nowrap; }
 .unassigned-row { background: #fff8f2; }
-.task-row td { padding-top: 9px; padding-bottom: 9px; color: #53605c; }
+.task-row td, .task-summary-row td { padding-top: 9px; padding-bottom: 9px; color: #53605c; }
+.task-summary-row .task-title strong { color: #263a35; }
+.assignment-row { background: #fff; }
+.assignment-row td { padding-top: 7px; padding-bottom: 7px; color: #687570; }
+.assignment-title { display: flex; align-items: center; gap: 7px; padding-left: 56px; font-size: 10px; }
+.assignment-label { color: #8a9591; font-size: 9px; }
 .task-title { padding-left: 27px; }
 .task-title strong { font-size: 11px; }
 .task-title small { display: flex; align-items: center; margin-top: 5px; color: #7a8682; font-size: 9px; }
@@ -133,6 +139,8 @@ h1 { font-size: 25px; font-weight: 700; letter-spacing: -.6px; margin: 5px 0 0; 
 .type-pill { border: 1px solid #d9dfda; background: #fff; padding: 3px 7px; border-radius: 4px; font-size: 9px; }
 .hour-input { width: 53px; border: 1px solid transparent; background: transparent; border-radius: 5px; padding: 4px 5px; font-weight: 600; }
 .hour-input:hover, .hour-input:focus { border-color: #c5d1cc; background: white; outline: 0; }
+.total-input { border-color: #cbd6d1; background: #fff; color: #1d4f47; }
+.task-total-input { border-color: #d8dfdb; background: #fff; }
 .muted { color: #8a9491 !important; }
 .empty { padding: 50px; text-align: center; color: var(--muted); }
 .member-grid { display: grid; grid-template-columns: repeat(3, minmax(280px, 1fr)); gap: 14px; }

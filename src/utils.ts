@@ -4,8 +4,13 @@ export const euro = new Intl.NumberFormat('es-ES', { style: 'currency', currency
 export const number = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 })
 
 export const initiativeHours = (initiative: Initiative, field: 'estimatedHours' | 'actualHours') =>
-  initiative.tasks.flatMap(t => t.assignments).reduce((sum, a) => sum + a[field], 0) +
-  (field === 'actualHours' ? initiative.unassignedActualHours ?? 0 : 0)
+  initiative.tasks.reduce((sum, task) => sum + task.assignments.reduce((taskSum, assignment) => taskSum + assignment[field], 0) +
+    (field === 'actualHours' ? task.unassignedActualHours ?? 0 : task.unassignedEstimatedHours ?? 0), 0) +
+  (field === 'actualHours' ? initiative.unassignedActualHours ?? 0 : initiative.unassignedEstimatedHours ?? 0)
+
+export const taskHours = (task: Initiative['tasks'][number], field: 'estimatedHours' | 'actualHours') =>
+  task.assignments.reduce((sum, assignment) => sum + assignment[field], 0) +
+  (field === 'actualHours' ? task.unassignedActualHours ?? 0 : task.unassignedEstimatedHours ?? 0)
 
 export const businessHours = (start: string, end: string, location: string, data: AppData, hoursPerDay = 8) => {
   const holidays = new Set(data.calendars.find(c => c.location === location)?.holidays.map(h => h.date) ?? [])

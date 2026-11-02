@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownRight, ArrowUpRight, BriefcaseBusiness, CalendarDays, ChevronDown, ChevronRight,
   CircleDollarSign, Clock3, Download, FileSpreadsheet, Gauge, LayoutDashboard, Plus, Search,
@@ -7,12 +7,28 @@ import {
 import { initialData } from './data'
 import { buildOctoberInitiatives, parseOctoberSheet } from './octoberData'
 import type { AppData, Initiative, InitiativeStatus, TaskType } from './types'
-import { businessHours, euro, initiativeHours, number, statusTone, uid } from './utils'
+import { businessHours, euro, initiativeHours, number, statusTone, taskHours, uid } from './utils'
 
 type View = 'dashboard' | 'initiatives' | 'team' | 'calendars'
 const STORAGE_KEY = 'brujula-project-control-v2'
 
 function cloneInitial(): AppData { return JSON.parse(JSON.stringify(initialData)) }
+
+const distributeHours = (assignments: { estimatedHours: number; actualHours: number }[], field: 'estimatedHours' | 'actualHours', target: number) => {
+  if (!assignments.length) return []
+  const current = assignments.map(a => a[field])
+  const fallback = field === 'actualHours' ? assignments.map(a => a.estimatedHours) : current
+  const weights = current.some(Boolean) ? current : fallback.some(Boolean) ? fallback : assignments.map(() => 1)
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0)
+  const targetTenths = Math.round(target * 10)
+  let allocatedTenths = 0
+  return weights.map((weight, index) => {
+    const remaining = targetTenths - allocatedTenths
+    const valueTenths = index === weights.length - 1 ? remaining : Math.min(remaining, Math.round(targetTenths * weight / weightTotal))
+    allocatedTenths += valueTenths
+    return valueTenths / 10
+  })
+}
 
 function App() {
   const [data, setData] = useState<AppData>(() => {
@@ -55,6 +71,44 @@ function App() {
         ...t, assignments: t.assignments.map(a => a.memberId !== memberId ? a : { ...a, [field]: Math.max(0, value || 0) }),
       })),
     })) }))
+  }
+
+  const updateTaskHours = (initiativeId: string, taskId: string, field: 'estimatedHours' | 'actualHours', value: number) => {
+    const target = Math.max(0, value || 0)
+    setData(current => ({ ...current, initiatives: current.initiatives.map(initiative => {
+      if (initiative.id !== initiativeId) return initiative
+      return { ...initiative, source: initiative.source ? { ...initiative.source, actualAllocation: 'manual' } : undefined,
+        tasks: initiative.tasks.map(task => {
+          if (task.id !== taskId) return task
+          if (!task.assignments.length) return { ...task, [field === 'estimatedHours' ? 'unassignedEstimatedHours' : 'unassignedActualHours']: target }
+          const values = distributeHours(task.assignments, field, target)
+          return { ...task,
+            unassignedEstimatedHours: field === 'estimatedHours' ? 0 : task.unassignedEstimatedHours,
+            unassignedActualHours: field === 'actualHours' ? 0 : task.unassignedActualHours,
+            assignments: task.assignments.map((assignment, index) => ({ ...assignment, [field]: values[index] })) }
+        }) }
+    }) }))
+  }
+
+  const updateInitiativeHours = (initiativeId: string, field: 'estimatedHours' | 'actualHours', value: number) => {
+    const target = Math.max(0, value || 0)
+    setData(current => ({ ...current, initiatives: current.initiatives.map(initiative => {
+      if (initiative.id !== initiativeId) return initiative
+      const assignments = initiative.tasks.flatMap(task => task.assignments)
+      if (!assignments.length) return { ...initiative,
+        source: initiative.source ? { ...initiative.source, actualAllocation: 'manual' } : undefined,
+        [field === 'estimatedHours' ? 'unassignedEstimatedHours' : 'unassignedActualHours']: target }
+      const values = distributeHours(assignments, field, target)
+      let index = 0
+      return { ...initiative,
+        source: initiative.source ? { ...initiative.source, actualAllocation: 'manual' } : undefined,
+        unassignedEstimatedHours: field === 'estimatedHours' ? 0 : initiative.unassignedEstimatedHours,
+        unassignedActualHours: field === 'actualHours' ? 0 : initiative.unassignedActualHours,
+        tasks: initiative.tasks.map(task => ({ ...task,
+          unassignedEstimatedHours: field === 'estimatedHours' ? 0 : task.unassignedEstimatedHours,
+          unassignedActualHours: field === 'actualHours' ? 0 : task.unassignedActualHours,
+          assignments: task.assignments.map(assignment => ({ ...assignment, [field]: values[index++] })) })) }
+    }) }))
   }
 
   const importExcel = async (file: File) => {
@@ -116,7 +170,8 @@ function App() {
 
       {view === 'dashboard' && <Dashboard data={data} totals={totals} setView={setView} />}
       {view === 'initiatives' && <Initiatives data={data} initiatives={filtered} search={search} setSearch={setSearch}
-        expanded={expanded} setExpanded={setExpanded} updateHours={updateHours} setModal={setModal} exportData={exportData} />}
+        expanded={expanded} setExpanded={setExpanded} updateHours={updateHours} updateTaskHours={updateTaskHours}
+        updateInitiativeHours={updateInitiativeHours} setModal={setModal} exportData={exportData} />}
       {view === 'team' && <Team data={data} />}
       {view === 'calendars' && <Calendars data={data} setData={setData} />}
     </main>
@@ -170,29 +225,63 @@ function Kpi({ icon, label, value, foot, tone }: { icon: React.ReactNode; label:
   return <div className="kpi card"><div className={`kpi-icon ${tone}`}>{icon}</div><span>{label}</span><strong>{value}</strong><small>{foot}</small></div>
 }
 
-function Initiatives({ data, initiatives, search, setSearch, expanded, setExpanded, updateHours, setModal, exportData }: {
+function Initiatives({ data, initiatives, search, setSearch, expanded, setExpanded, updateHours, updateTaskHours, updateInitiativeHours, setModal, exportData }: {
   data: AppData; initiatives: Initiative[]; search: string; setSearch: (s: string) => void; expanded: string[]; setExpanded: (v: string[]) => void;
-  updateHours: (i: string, t: string, m: string, f: 'estimatedHours' | 'actualHours', v: number) => void; setModal: (v: 'task') => void; exportData: () => void
+  updateHours: (i: string, t: string, m: string, f: 'estimatedHours' | 'actualHours', v: number) => void;
+  updateTaskHours: (i: string, t: string, f: 'estimatedHours' | 'actualHours', v: number) => void;
+  updateInitiativeHours: (i: string, f: 'estimatedHours' | 'actualHours', v: number) => void;
+  setModal: (v: 'task') => void; exportData: () => void
 }) {
   return <div className="content">
     <div className="toolbar"><div className="search"><Search /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por iniciativa, código o servicio…" /></div><button className="button secondary"><Settings2 /> Filtros</button><button className="button secondary" onClick={exportData}><Download /> Exportar</button><button className="button primary" onClick={() => setModal('task')}><Plus /> Nueva tarea</button></div>
     <div className="card table-card"><table className="project-table"><thead><tr><th>Iniciativa / tarea</th><th>Estado / tipo</th><th>Periodo</th><th>Estimadas</th><th>Reales</th><th>Desviación</th><th>Forecast</th></tr></thead><tbody>{initiatives.map(i => {
       const est = initiativeHours(i, 'estimatedHours'), real = initiativeHours(i, 'actualHours'), isOpen = expanded.includes(i.id)
       const cost = i.tasks.flatMap(t => t.assignments).reduce((sum, a) => sum + a.estimatedHours * (data.members.find(m => m.id === a.memberId)?.hourlyRate ?? 0), 0)
-      return <TableGroup key={i.id} initiative={i} data={data} open={isOpen} toggle={() => setExpanded(isOpen ? expanded.filter(x => x !== i.id) : [...expanded, i.id])} est={est} real={real} cost={cost} updateHours={updateHours} />
+      return <TableGroup key={i.id} initiative={i} data={data} open={isOpen} toggle={() => setExpanded(isOpen ? expanded.filter(x => x !== i.id) : [...expanded, i.id])} est={est} real={real} cost={cost} updateHours={updateHours} updateTaskHours={updateTaskHours} updateInitiativeHours={updateInitiativeHours} />
     })}</tbody></table>{!initiatives.length && <div className="empty">No hay iniciativas que coincidan con la búsqueda.</div>}</div>
   </div>
 }
 
-function TableGroup({ initiative: i, data, open, toggle, est, real, cost, updateHours }: { initiative: Initiative; data: AppData; open: boolean; toggle: () => void; est: number; real: number; cost: number; updateHours: (i: string, t: string, m: string, f: 'estimatedHours' | 'actualHours', v: number) => void }) {
+function TableGroup({ initiative: i, data, open, toggle, est, real, cost, updateHours, updateTaskHours, updateInitiativeHours }: { initiative: Initiative; data: AppData; open: boolean; toggle: () => void; est: number; real: number; cost: number; updateHours: (i: string, t: string, m: string, f: 'estimatedHours' | 'actualHours', v: number) => void; updateTaskHours: (i: string, t: string, f: 'estimatedHours' | 'actualHours', v: number) => void; updateInitiativeHours: (i: string, f: 'estimatedHours' | 'actualHours', v: number) => void }) {
   return <>
-    <tr className="initiative-main" onClick={toggle}><td><div className="table-title">{open ? <ChevronDown /> : <ChevronRight />}<div><strong>{i.name}</strong><small>{i.source?.sourceId ? `${i.source.sourceId} · ` : ''}{i.service} · {i.projectCode}{i.source?.priority ? ` · Prioridad ${i.source.priority}` : ''}</small></div></div></td><td><span className={`pill ${statusTone(i.status)}`}>{i.status}</span></td><td><span className="date-range">{i.startDate.slice(5).replace('-', '/')} — {i.endDate.slice(5).replace('-', '/')}</span></td><td><b>{est} h</b></td><td><b>{real} h</b></td><td><strong className={real > est ? 'negative' : 'positive'}>{real - est > 0 ? '+' : ''}{real - est} h</strong></td><td><b>{euro.format(cost)}</b></td></tr>
+    <tr className="initiative-main" onClick={toggle}>
+      <td><div className="table-title">{open ? <ChevronDown /> : <ChevronRight />}<div><strong>{i.name}</strong><small>{i.source?.sourceId ? `${i.source.sourceId} · ` : ''}{i.service} · {i.projectCode}{i.source?.priority ? ` · Prioridad ${i.source.priority}` : ''}</small></div></div></td>
+      <td><span className={`pill ${statusTone(i.status)}`}>{i.status}</span></td>
+      <td><span className="date-range">{i.startDate.slice(5).replace('-', '/')} — {i.endDate.slice(5).replace('-', '/')}</span></td>
+      <td><input aria-label={`Horas estimadas de ${i.name}`} className="hour-input total-input" type="number" min="0" step="0.5" value={est} onClick={event => event.stopPropagation()} onChange={event => updateInitiativeHours(i.id, 'estimatedHours', +event.target.value)} /> h</td>
+      <td><input aria-label={`Horas reales de ${i.name}`} className="hour-input total-input" type="number" min="0" step="0.5" value={real} onClick={event => event.stopPropagation()} onChange={event => updateInitiativeHours(i.id, 'actualHours', +event.target.value)} /> h</td>
+      <td><strong className={real > est ? 'negative' : 'positive'}>{real - est > 0 ? '+' : ''}{number.format(real - est)} h</strong></td>
+      <td><b>{euro.format(cost)}</b></td>
+    </tr>
     {open && i.source && <tr className="source-row"><td colSpan={7}><div><strong>{i.source.process || i.source.requestType || 'Detalle de origen'}</strong><span>{i.source.description || i.source.observations || 'Sin descripción en la hoja de encargo.'}</span></div><div><span>Plan semanal: {i.source.plannedWeeks.join(' · ')} h</span><span>Imputado: {i.source.actualWeeks.join(' · ')} h</span><span>{i.source.actualAllocation === 'proportional' ? 'Reales repartidas proporcionalmente por persona' : i.source.actualAllocation === 'unassigned' ? 'Imputación sin responsable asignado' : 'Horas editadas manualmente'}</span></div></td></tr>}
-    {open && i.tasks.map(t => t.assignments.length ? t.assignments.map((a, idx) => {
-      const member = data.members.find(m => m.id === a.memberId)!, diff = a.actualHours - a.estimatedHours
-      return <tr className="task-row" key={`${t.id}-${a.memberId}`}><td><div className="task-title"><span className={`task-line ${idx ? 'continued' : ''}`} />{idx === 0 && <div><strong>{t.name}</strong><small><span className="avatar mini" style={{ background: member.color }}>{member.initials}</span>{member.name} · {member.location}</small></div>}{idx > 0 && <div><small><span className="avatar mini" style={{ background: member.color }}>{member.initials}</span>{member.name} · {member.location}</small></div>}</div></td><td><span className="type-pill">{t.type}</span></td><td>—</td><td><input className="hour-input" type="number" min="0" value={a.estimatedHours} onChange={e => updateHours(i.id, t.id, a.memberId, 'estimatedHours', +e.target.value)} /> h</td><td><input className="hour-input" type="number" min="0" value={a.actualHours} onChange={e => updateHours(i.id, t.id, a.memberId, 'actualHours', +e.target.value)} /> h</td><td><strong className={diff > 0 ? 'negative' : diff < 0 ? 'positive' : ''}>{diff > 0 ? '+' : ''}{diff} h</strong></td><td>{euro.format(a.estimatedHours * member.hourlyRate)}</td></tr>
-    }) : <tr className="task-row" key={t.id}><td><div className="task-title"><span className="task-line" /><strong>{t.name}</strong></div></td><td><span className="type-pill">{t.type}</span></td><td colSpan={5} className="muted">Sin asignación</td></tr>)}
-    {open && Boolean(i.unassignedActualHours) && <tr className="task-row unassigned-row"><td><div className="task-title"><span className="task-line" /><strong>Imputación sin responsable</strong></div></td><td><span className="type-pill">Pendiente</span></td><td>—</td><td>0 h</td><td><b>{i.unassignedActualHours} h</b></td><td><strong className="negative">+{i.unassignedActualHours} h</strong></td><td>—</td></tr>}
+    {open && i.tasks.map(task => {
+      const estimated = taskHours(task, 'estimatedHours')
+      const actual = taskHours(task, 'actualHours')
+      const taskCost = task.assignments.reduce((sum, assignment) => sum + assignment.estimatedHours * (data.members.find(member => member.id === assignment.memberId)?.hourlyRate ?? 0), 0)
+      return <Fragment key={task.id}>
+        <tr className="task-summary-row">
+          <td><div className="task-title"><span className="task-line" /><strong>{task.name}</strong></div></td>
+          <td><span className="type-pill">{task.type}</span></td><td>—</td>
+          <td><input aria-label={`Horas estimadas de la tarea ${task.name}`} className="hour-input task-total-input" type="number" min="0" step="0.5" value={estimated} onChange={event => updateTaskHours(i.id, task.id, 'estimatedHours', +event.target.value)} /> h</td>
+          <td><input aria-label={`Horas reales de la tarea ${task.name}`} className="hour-input task-total-input" type="number" min="0" step="0.5" value={actual} onChange={event => updateTaskHours(i.id, task.id, 'actualHours', +event.target.value)} /> h</td>
+          <td><strong className={actual > estimated ? 'negative' : actual < estimated ? 'positive' : ''}>{actual - estimated > 0 ? '+' : ''}{number.format(actual - estimated)} h</strong></td>
+          <td>{euro.format(taskCost)}</td>
+        </tr>
+        {task.assignments.map(assignment => {
+          const member = data.members.find(candidate => candidate.id === assignment.memberId)!
+          const difference = assignment.actualHours - assignment.estimatedHours
+          return <tr className="assignment-row" key={`${task.id}-${assignment.memberId}`}>
+            <td><div className="assignment-title"><span className="avatar mini" style={{ background: member.color }}>{member.initials}</span><span>{member.name} · {member.location}</span></div></td>
+            <td><span className="assignment-label">Asignación</span></td><td>—</td>
+            <td><input className="hour-input" type="number" min="0" step="0.5" value={assignment.estimatedHours} onChange={event => updateHours(i.id, task.id, assignment.memberId, 'estimatedHours', +event.target.value)} /> h</td>
+            <td><input className="hour-input" type="number" min="0" step="0.5" value={assignment.actualHours} onChange={event => updateHours(i.id, task.id, assignment.memberId, 'actualHours', +event.target.value)} /> h</td>
+            <td><strong className={difference > 0 ? 'negative' : difference < 0 ? 'positive' : ''}>{difference > 0 ? '+' : ''}{number.format(difference)} h</strong></td>
+            <td>{euro.format(assignment.estimatedHours * member.hourlyRate)}</td>
+          </tr>
+        })}
+      </Fragment>
+    })}
+    {open && Boolean((i.unassignedEstimatedHours ?? 0) + (i.unassignedActualHours ?? 0)) && <tr className="task-row unassigned-row"><td><div className="task-title"><span className="task-line" /><strong>Horas sin responsable</strong></div></td><td><span className="type-pill">Pendiente</span></td><td>—</td><td><b>{i.unassignedEstimatedHours ?? 0} h</b></td><td><b>{i.unassignedActualHours ?? 0} h</b></td><td><strong className={(i.unassignedActualHours ?? 0) > (i.unassignedEstimatedHours ?? 0) ? 'negative' : 'positive'}>{number.format((i.unassignedActualHours ?? 0) - (i.unassignedEstimatedHours ?? 0))} h</strong></td><td>—</td></tr>}
   </>
 }
 
@@ -226,7 +315,8 @@ function CreateModal({ mode, data, setData, close }: { mode: 'initiative' | 'tas
       setData(current => ({ ...current, initiatives: [...current.initiatives, initiative] }))
     } else {
       const initiativeId = String(form.get('initiative')), memberId = String(form.get('member'))
-      setData(current => ({ ...current, initiatives: current.initiatives.map(i => i.id !== initiativeId ? i : ({ ...i, tasks: [...i.tasks, { id: uid(), name: String(form.get('name')), type: String(form.get('type')) as TaskType, assignments: memberId ? [{ memberId, estimatedHours: Number(form.get('estimated')) || 0, actualHours: 0 }] : [] }] })) }))
+      const estimatedHours = Number(form.get('estimated')) || 0
+      setData(current => ({ ...current, initiatives: current.initiatives.map(i => i.id !== initiativeId ? i : ({ ...i, tasks: [...i.tasks, { id: uid(), name: String(form.get('name')), type: String(form.get('type')) as TaskType, assignments: memberId ? [{ memberId, estimatedHours, actualHours: 0 }] : [], unassignedEstimatedHours: memberId ? 0 : estimatedHours }] })) }))
     } close()
   }
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && close()}><form className="modal" onSubmit={submit}><div className="modal-head"><div><span className="eyebrow">BANCO SABADELL</span><h2>{mode === 'initiative' ? 'Nueva iniciativa' : 'Nueva tarea'}</h2></div><button type="button" onClick={close}><X /></button></div>
